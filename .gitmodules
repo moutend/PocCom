@@ -1,0 +1,9 @@
+[submodule "lib/cpplogger"]
+	path = lib/cpplogger
+	url = https://github.com/moutend/cpplogger
+[submodule "lib/ICoreServer"]
+	path = lib/ICoreServer
+	url = https://github.com/moutend/ICoreServer
+[submodule "lib/IPocCom"]
+	path = lib/IPocCom
+	url = https://github.com/moutend/IPocCom
