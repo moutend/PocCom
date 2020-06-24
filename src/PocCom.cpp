@@ -1,6 +1,7 @@
 #include <cpplogger/cpplogger.h>
 #include <mutex>
 #include <shlwapi.h>
+#include <strsafe.h>
 #include <windows.h>
 
 #include "PocCom.h"
