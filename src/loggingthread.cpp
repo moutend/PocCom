@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 #include "context.h"
-#include "logloop.h"
+#include "loggingthread.h"
 #include "util.h"
 
 using namespace web;
@@ -13,16 +13,17 @@ using namespace web::http;
 using namespace web::http::client;
 
 extern Logger::Logger *Log;
+extern wchar_t *LogServerAddr;
 
 pplx::task<http_response> postRequest(json::value postData) {
-  http_client client(U("http://localhost:7901/v1/log"));
+  http_client client(LogServerAddr);
 
   return client.request(methods::POST, U(""), postData.serialize(),
                         U("application/json"));
 }
 
-DWORD WINAPI logLoop(LPVOID context) {
-  LogLoopContext *ctx = static_cast<LogLoopContext *>(context);
+DWORD WINAPI loggingThread(LPVOID context) {
+  LoggingContext *ctx = static_cast<LoggingContext *>(context);
 
   if (ctx == nullptr) {
     return E_FAIL;

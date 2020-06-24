@@ -5,7 +5,7 @@
 
 #include "types.h"
 
-struct LogLoopContext {
+struct LoggingContext {
   HANDLE QuitEvent = nullptr;
 };
 

@@ -5,7 +5,7 @@
 
 #include "context.h"
 #include "uiahandler.h"
-#include "uialoop.h"
+#include "uiathread.h"
 #include "util.h"
 
 extern Logger::Logger *Log;

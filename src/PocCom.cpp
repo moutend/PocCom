@@ -3,40 +3,41 @@
 #include <shlwapi.h>
 #include <windows.h>
 
-#include "CoreServer.h"
+#include "PocCom.h"
 #include "util.h"
 
 extern Logger::Logger *Log;
+extern wchar_t *logServerAddr;
 
-const TCHAR ProgIDStr[] = TEXT("ScreenReaderX.CoreServer");
+const TCHAR ProgIDStr[] = TEXT("ScreenReaderX.PocCom");
 LONG LockCount{};
-HINSTANCE CoreServerDLLInstance{};
-TCHAR CoreServerCLSIDStr[256]{};
+HINSTANCE PocComDLLInstance{};
+TCHAR PocComCLSIDStr[256]{};
 TCHAR LibraryIDStr[256]{};
 
-// CCoreServer
-CCoreServer::CCoreServer() : mReferenceCount(1), mTypeInfo(nullptr) {
+// CPocCom
+CPocCom::CPocCom() : mReferenceCount(1), mTypeInfo(nullptr) {
   ITypeLib *pTypeLib{};
   HRESULT hr{};
 
   LockModule(true);
 
-  hr = LoadRegTypeLib(LIBID_CoreServerLib, 1, 0, 0, &pTypeLib);
+  hr = LoadRegTypeLib(LIBID_PocComLib, 1, 0, 0, &pTypeLib);
 
   if (SUCCEEDED(hr)) {
-    pTypeLib->GetTypeInfoOfGuid(IID_ICoreServer, &mTypeInfo);
+    pTypeLib->GetTypeInfoOfGuid(IID_IPocCom, &mTypeInfo);
     pTypeLib->Release();
   }
 }
 
-CCoreServer::~CCoreServer() { LockModule(false); }
+CPocCom::~CPocCom() { LockModule(false); }
 
-STDMETHODIMP CCoreServer::QueryInterface(REFIID riid, void **ppvObject) {
+STDMETHODIMP CPocCom::QueryInterface(REFIID riid, void **ppvObject) {
   *ppvObject = nullptr;
 
   if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IDispatch) ||
-      IsEqualIID(riid, IID_ICoreServer)) {
-    *ppvObject = static_cast<ICoreServer *>(this);
+      IsEqualIID(riid, IID_IPocCom)) {
+    *ppvObject = static_cast<IPocCom *>(this);
   } else {
     return E_NOINTERFACE;
   }
@@ -46,11 +47,11 @@ STDMETHODIMP CCoreServer::QueryInterface(REFIID riid, void **ppvObject) {
   return S_OK;
 }
 
-STDMETHODIMP_(ULONG) CCoreServer::AddRef() {
+STDMETHODIMP_(ULONG) CPocCom::AddRef() {
   return InterlockedIncrement(&mReferenceCount);
 }
 
-STDMETHODIMP_(ULONG) CCoreServer::Release() {
+STDMETHODIMP_(ULONG) CPocCom::Release() {
   if (InterlockedDecrement(&mReferenceCount) == 0) {
     delete this;
 
@@ -60,14 +61,13 @@ STDMETHODIMP_(ULONG) CCoreServer::Release() {
   return mReferenceCount;
 }
 
-STDMETHODIMP CCoreServer::GetTypeInfoCount(UINT *pctinfo) {
+STDMETHODIMP CPocCom::GetTypeInfoCount(UINT *pctinfo) {
   *pctinfo = mTypeInfo != nullptr ? 1 : 0;
 
   return S_OK;
 }
 
-STDMETHODIMP CCoreServer::GetTypeInfo(UINT iTInfo, LCID lcid,
-                                      ITypeInfo **ppTInfo) {
+STDMETHODIMP CPocCom::GetTypeInfo(UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo) {
   if (mTypeInfo == nullptr) {
     return E_NOTIMPL;
   }
@@ -78,9 +78,8 @@ STDMETHODIMP CCoreServer::GetTypeInfo(UINT iTInfo, LCID lcid,
   return S_OK;
 }
 
-STDMETHODIMP CCoreServer::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames,
-                                        UINT cNames, LCID lcid,
-                                        DISPID *rgDispId) {
+STDMETHODIMP CPocCom::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames,
+                                    UINT cNames, LCID lcid, DISPID *rgDispId) {
   if (mTypeInfo == nullptr) {
     return E_NOTIMPL;
   }
@@ -88,11 +87,11 @@ STDMETHODIMP CCoreServer::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames,
   return mTypeInfo->GetIDsOfNames(rgszNames, cNames, rgDispId);
 }
 
-STDMETHODIMP CCoreServer::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid,
-                                 WORD wFlags, DISPPARAMS *pDispParams,
-                                 VARIANT *pVarResult, EXCEPINFO *pExcepInfo,
-                                 UINT *puArgErr) {
-  void *p = static_cast<ICoreServer *>(this);
+STDMETHODIMP CPocCom::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid,
+                             WORD wFlags, DISPPARAMS *pDispParams,
+                             VARIANT *pVarResult, EXCEPINFO *pExcepInfo,
+                             UINT *puArgErr) {
+  void *p = static_cast<IPocCom *>(this);
 
   if (mTypeInfo == nullptr) {
     return E_NOTIMPL;
@@ -102,11 +101,11 @@ STDMETHODIMP CCoreServer::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid,
                            pExcepInfo, puArgErr);
 }
 
-STDMETHODIMP CCoreServer::Start() {
+STDMETHODIMP CPocCom::Start(LPWSTR logServerAddr, LOGLEVEL level) {
   std::lock_guard<std::mutex> lock(mMutex);
 
   if (mIsActive) {
-    Log->Warn(L"ICoreServer::Start() is already called", GetCurrentThreadId(),
+    Log->Warn(L"IPocCom::Start() is already called", GetCurrentThreadId(),
               __LONGFILE__);
 
     return E_FAIL;
@@ -114,27 +113,37 @@ STDMETHODIMP CCoreServer::Start() {
 
   mIsActive = true;
 
-  Log = new Logger::Logger(L"CoreServer", L"v0.1.0-develop", 4096);
+  // Assumes that the `logServerAddr` is form of "hostname:port".
+  LogServerAddr = new wchar_t[128]{};
 
-  Log->Info(L"Called ICoreServer::Start()", GetCurrentThreadId(), __LONGFILE__);
+  HRESULT hr =
+      StringCbPrintfW(LogServerAddr, 256, L"http://%s/v1/log", logServerAddr);
 
-  mLogLoopCtx = new LogLoopContext();
+  if (FAILED(hr)) {
+    return E_FAIL;
+  }
 
-  mLogLoopCtx->QuitEvent =
+  Log = new Logger::Logger(L"PocCom", L"v0.1.0-develop", 4096);
+
+  Log->Info(L"Called IPocCom::Start()", GetCurrentThreadId(), __LONGFILE__);
+
+  mLoggingCtx = new LoggingContext();
+
+  mLoggingCtx->QuitEvent =
       CreateEventEx(nullptr, nullptr, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
 
-  if (mLogLoopCtx->QuitEvent == nullptr) {
+  if (mLoggingCtx->QuitEvent == nullptr) {
     Log->Fail(L"Failed to create event", GetCurrentThreadId(), __LONGFILE__);
 
     return E_FAIL;
   }
 
-  Log->Info(L"Create log loop thread", GetCurrentThreadId(), __LONGFILE__);
+  Log->Info(L"Create logging thread", GetCurrentThreadId(), __LONGFILE__);
 
-  mLogLoopThread = CreateThread(nullptr, 0, logLoop,
-                                static_cast<void *>(mLogLoopCtx), 0, nullptr);
+  mLoggingThread = CreateThread(nullptr, 0, loggingThread,
+                                static_cast<void *>(mLoggingCtx), 0, nullptr);
 
-  if (mLogLoopThread == nullptr) {
+  if (mLoggingThread == nullptr) {
     Log->Fail(L"Failed to create thread", GetCurrentThreadId(), __LONGFILE__);
 
     return E_FAIL;
@@ -184,14 +193,14 @@ STDMETHODIMP CCoreServer::Start() {
   return S_OK;
 }
 
-STDMETHODIMP CCoreServer::Stop() {
+STDMETHODIMP CPocCom::Stop() {
   std::lock_guard<std::mutex> lock(mMutex);
 
   if (!mIsActive) {
     return E_FAIL;
   }
 
-  Log->Info(L"Called ICoreServer::Stop()", GetCurrentThreadId(), __LONGFILE__);
+  Log->Info(L"Called IPocCom::Stop()", GetCurrentThreadId(), __LONGFILE__);
 
   if (mUIAThread == nullptr) {
     goto END_UIA_CLEANUP;
@@ -224,20 +233,20 @@ END_UIA_CLEANUP:
 
 END_WINDOWS_EVENT_CLEANUP:
 
-  if (mLogLoopThread == nullptr) {
+  if (mLoggingThread == nullptr) {
     goto END_LOGLOOP_CLEANUP;
   }
-  if (!SetEvent(mLogLoopCtx->QuitEvent)) {
+  if (!SetEvent(mLoggingCtx->QuitEvent)) {
     Log->Fail(L"Failed to send event", GetCurrentThreadId(), __LONGFILE__);
     return E_FAIL;
   }
 
-  WaitForSingleObject(mLogLoopThread, INFINITE);
-  SafeCloseHandle(&mLogLoopThread);
-  SafeCloseHandle(&(mLogLoopCtx->QuitEvent));
+  WaitForSingleObject(mLoggingThread, INFINITE);
+  SafeCloseHandle(&mLoggingThread);
+  SafeCloseHandle(&(mLoggingCtx->QuitEvent));
 
-  delete mLogLoopCtx;
-  mLogLoopCtx = nullptr;
+  delete mLoggingCtx;
+  mLoggingCtx = nullptr;
 
 END_LOGLOOP_CLEANUP:
 
@@ -246,7 +255,7 @@ END_LOGLOOP_CLEANUP:
   return S_OK;
 }
 
-STDMETHODIMP CCoreServer::SetUIAEventHandler(IUIEventHandler handleFunc) {
+STDMETHODIMP CPocCom::SetUIAEventHandler(IUIEventHandler handleFunc) {
   std::lock_guard<std::mutex> lock(mMutex);
 
   mAutomationCtx->IUIEventHandleFunc = handleFunc;
@@ -254,7 +263,7 @@ STDMETHODIMP CCoreServer::SetUIAEventHandler(IUIEventHandler handleFunc) {
   return S_OK;
 }
 
-STDMETHODIMP CCoreServer::SetMSAAEventHandler(IAEventHandler handleFunc) {
+STDMETHODIMP CPocCom::SetMSAAEventHandler(IAEventHandler handleFunc) {
   std::lock_guard<std::mutex> lock(mMutex);
 
   mAutomationCtx->IAEventHandleFunc = handleFunc;
@@ -263,17 +272,17 @@ STDMETHODIMP CCoreServer::SetMSAAEventHandler(IAEventHandler handleFunc) {
 }
 
 STDMETHODIMP
-CCoreServer::GetIUIAutomationElement(TreeWalkerDirection direction,
-                                     IUIAutomationElement *pRootElement,
-                                     IUIAutomationElement **ppElement) {
+CPocCom::GetIUIAutomationElement(TreeWalkerDirection direction,
+                                 IUIAutomationElement *pRootElement,
+                                 IUIAutomationElement **ppElement) {
   std::lock_guard<std::mutex> lock(mMutex);
 
   if (ppElement == nullptr || mAutomationCtx->BaseTreeWalker == nullptr) {
     return E_FAIL;
   }
 
-  Log->Info(L"Called ICoreServer::GetIUIAutomationElement()",
-            GetCurrentThreadId(), __LONGFILE__);
+  Log->Info(L"Called IPocCom::GetIUIAutomationElement()", GetCurrentThreadId(),
+            __LONGFILE__);
 
   HRESULT hr{};
 
@@ -306,10 +315,10 @@ CCoreServer::GetIUIAutomationElement(TreeWalkerDirection direction,
 }
 
 STDMETHODIMP
-CCoreServer::UpdateTreeWalker() {
+CPocCom::UpdateTreeWalker() {
   std::lock_guard<std::mutex> lock(mMutex);
 
-  Log->Info(L"Called ICoreServer::UpdateTreeWalker()", GetCurrentThreadId(),
+  Log->Info(L"Called IPocCom::UpdateTreeWalker()", GetCurrentThreadId(),
             __LONGFILE__);
 
   SafeRelease(&(mAutomationCtx->BaseTreeWalker));
@@ -328,11 +337,10 @@ CCoreServer::UpdateTreeWalker() {
 }
 
 STDMETHODIMP
-CCoreServer::ElementFromHandle(UIA_HWND hwnd,
-                               IUIAutomationElement **ppElement) {
+CPocCom::ElementFromHandle(UIA_HWND hwnd, IUIAutomationElement **ppElement) {
   std::lock_guard<std::mutex> lock(mMutex);
 
-  Log->Info(L"Called ICoreServer::ElementFromHandle()", GetCurrentThreadId(),
+  Log->Info(L"Called IPocCom::ElementFromHandle()", GetCurrentThreadId(),
             __LONGFILE__);
 
   HRESULT hr{};
@@ -347,8 +355,8 @@ CCoreServer::ElementFromHandle(UIA_HWND hwnd,
   return S_OK;
 }
 
-// CCoreServerFactory
-STDMETHODIMP CCoreServerFactory::QueryInterface(REFIID riid, void **ppvObject) {
+// CPocComFactory
+STDMETHODIMP CPocComFactory::QueryInterface(REFIID riid, void **ppvObject) {
   *ppvObject = nullptr;
 
   if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IClassFactory)) {
@@ -362,21 +370,21 @@ STDMETHODIMP CCoreServerFactory::QueryInterface(REFIID riid, void **ppvObject) {
   return S_OK;
 }
 
-STDMETHODIMP_(ULONG) CCoreServerFactory::AddRef() {
+STDMETHODIMP_(ULONG) CPocComFactory::AddRef() {
   LockModule(true);
 
   return 2;
 }
 
-STDMETHODIMP_(ULONG) CCoreServerFactory::Release() {
+STDMETHODIMP_(ULONG) CPocComFactory::Release() {
   LockModule(false);
 
   return 1;
 }
 
-STDMETHODIMP CCoreServerFactory::CreateInstance(IUnknown *pUnkOuter,
-                                                REFIID riid, void **ppvObject) {
-  CCoreServer *p{};
+STDMETHODIMP CPocComFactory::CreateInstance(IUnknown *pUnkOuter, REFIID riid,
+                                            void **ppvObject) {
+  CPocCom *p{};
   HRESULT hr{};
 
   *ppvObject = nullptr;
@@ -385,7 +393,7 @@ STDMETHODIMP CCoreServerFactory::CreateInstance(IUnknown *pUnkOuter,
     return CLASS_E_NOAGGREGATION;
   }
 
-  p = new CCoreServer();
+  p = new CPocCom();
 
   if (p == nullptr) {
     return E_OUTOFMEMORY;
@@ -397,7 +405,7 @@ STDMETHODIMP CCoreServerFactory::CreateInstance(IUnknown *pUnkOuter,
   return hr;
 }
 
-STDMETHODIMP CCoreServerFactory::LockServer(BOOL fLock) {
+STDMETHODIMP CPocComFactory::LockServer(BOOL fLock) {
   LockModule(fLock);
 
   return S_OK;
@@ -407,11 +415,11 @@ STDMETHODIMP CCoreServerFactory::LockServer(BOOL fLock) {
 STDAPI DllCanUnloadNow(void) { return LockCount == 0 ? S_OK : S_FALSE; }
 
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv) {
-  static CCoreServerFactory serverFactory;
+  static CPocComFactory serverFactory;
   HRESULT hr{};
   *ppv = nullptr;
 
-  if (IsEqualCLSID(rclsid, CLSID_CoreServer)) {
+  if (IsEqualCLSID(rclsid, CLSID_PocCom)) {
     hr = serverFactory.QueryInterface(riid, ppv);
   } else {
     hr = CLASS_E_CLASSNOTAVAILABLE;
@@ -427,29 +435,29 @@ STDAPI DllRegisterServer(void) {
   HRESULT hr{};
   ITypeLib *pTypeLib{};
 
-  wsprintf(szKey, TEXT("CLSID\\%s"), CoreServerCLSIDStr);
+  wsprintf(szKey, TEXT("CLSID\\%s"), PocComCLSIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr,
-                         TEXT("ScreenReaderX.CoreServer"))) {
+                         TEXT("ScreenReaderX.PocCom"))) {
     return E_FAIL;
   }
 
-  GetModuleFileName(CoreServerDLLInstance, szModulePath,
+  GetModuleFileName(PocComDLLInstance, szModulePath,
                     sizeof(szModulePath) / sizeof(TCHAR));
-  wsprintf(szKey, TEXT("CLSID\\%s\\InprocServer32"), CoreServerCLSIDStr);
+  wsprintf(szKey, TEXT("CLSID\\%s\\InprocServer32"), PocComCLSIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr, szModulePath)) {
     return E_FAIL;
   }
 
-  wsprintf(szKey, TEXT("CLSID\\%s\\InprocServer32"), CoreServerCLSIDStr);
+  wsprintf(szKey, TEXT("CLSID\\%s\\InprocServer32"), PocComCLSIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, TEXT("ThreadingModel"),
                          TEXT("Apartment"))) {
     return E_FAIL;
   }
 
-  wsprintf(szKey, TEXT("CLSID\\%s\\ProgID"), CoreServerCLSIDStr);
+  wsprintf(szKey, TEXT("CLSID\\%s\\ProgID"), PocComCLSIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr,
                          (LPTSTR)ProgIDStr)) {
@@ -459,18 +467,18 @@ STDAPI DllRegisterServer(void) {
   wsprintf(szKey, TEXT("%s"), ProgIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr,
-                         TEXT("ScreenReaderX.CoreServer"))) {
+                         TEXT("ScreenReaderX.PocCom"))) {
     return E_FAIL;
   }
 
   wsprintf(szKey, TEXT("%s\\CLSID"), ProgIDStr);
 
   if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr,
-                         (LPTSTR)CoreServerCLSIDStr)) {
+                         (LPTSTR)PocComCLSIDStr)) {
     return E_FAIL;
   }
 
-  GetModuleFileNameW(CoreServerDLLInstance, szTypeLibPath,
+  GetModuleFileNameW(PocComDLLInstance, szTypeLibPath,
                      sizeof(szTypeLibPath) / sizeof(TCHAR));
 
   hr = LoadTypeLib(szTypeLibPath, &pTypeLib);
@@ -479,7 +487,7 @@ STDAPI DllRegisterServer(void) {
     hr = RegisterTypeLib(pTypeLib, szTypeLibPath, nullptr);
 
     if (SUCCEEDED(hr)) {
-      wsprintf(szKey, TEXT("CLSID\\%s\\TypeLib"), CoreServerCLSIDStr);
+      wsprintf(szKey, TEXT("CLSID\\%s\\TypeLib"), PocComCLSIDStr);
 
       if (!CreateRegistryKey(HKEY_CLASSES_ROOT, szKey, nullptr, LibraryIDStr)) {
         pTypeLib->Release();
@@ -497,13 +505,13 @@ STDAPI DllRegisterServer(void) {
 STDAPI DllUnregisterServer(void) {
   TCHAR szKey[256]{};
 
-  wsprintf(szKey, TEXT("CLSID\\%s"), CoreServerCLSIDStr);
+  wsprintf(szKey, TEXT("CLSID\\%s"), PocComCLSIDStr);
   SHDeleteKey(HKEY_CLASSES_ROOT, szKey);
 
   wsprintf(szKey, TEXT("%s"), ProgIDStr);
   SHDeleteKey(HKEY_CLASSES_ROOT, szKey);
 
-  UnRegisterTypeLib(LIBID_CoreServerLib, 1, 0, LOCALE_NEUTRAL, SYS_WIN32);
+  UnRegisterTypeLib(LIBID_PocComLib, 1, 0, LOCALE_NEUTRAL, SYS_WIN32);
 
   return S_OK;
 }
@@ -511,10 +519,10 @@ STDAPI DllUnregisterServer(void) {
 BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved) {
   switch (dwReason) {
   case DLL_PROCESS_ATTACH:
-    CoreServerDLLInstance = hInstance;
+    PocComDLLInstance = hInstance;
     DisableThreadLibraryCalls(hInstance);
-    GetGuidString(CLSID_CoreServer, CoreServerCLSIDStr);
-    GetGuidString(LIBID_CoreServerLib, LibraryIDStr);
+    GetGuidString(CLSID_PocCom, PocComCLSIDStr);
+    GetGuidString(LIBID_PocComLib, LibraryIDStr);
 
     return TRUE;
   }

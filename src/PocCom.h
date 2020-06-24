@@ -1,18 +1,18 @@
 #pragma once
 
-#include <ICoreServer/ICoreServer.h>
+#include <IPocCom/IPocCom.h>
 #include <cpplogger/cpplogger.h>
 #include <mutex>
 #include <windows.h>
 
 #include "context.h"
-#include "logloop.h"
-#include "uialoop.h"
-#include "wineventloop.h"
+#include "loggingthread.h"
+#include "uiathread.h"
+#include "wineventthread.h"
 
 #include <UIAutomationClient.h>
 
-class CCoreServer : public ICoreServer {
+class CPocCom : public IPocCom {
 public:
   // IUnknown methods
   STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject);
@@ -28,8 +28,8 @@ public:
                       DISPPARAMS *pDispParams, VARIANT *pVarResult,
                       EXCEPINFO *pExcepInfo, UINT *puArgErr);
 
-  // ICoreServer methods
-  STDMETHODIMP Start();
+  // IPocCom methods
+  STDMETHODIMP Start(LPWSTR loggerURL, LOGLEVEL level);
   STDMETHODIMP Stop();
   STDMETHODIMP SetMSAAEventHandler(IAEventHandler handleFunc);
   STDMETHODIMP SetUIAEventHandler(IUIEventHandler handleFunc);
@@ -41,8 +41,8 @@ public:
   STDMETHODIMP ElementFromHandle(UIA_HWND hwnd,
                                  IUIAutomationElement **ppElement);
 
-  CCoreServer();
-  ~CCoreServer();
+  CPocCom();
+  ~CPocCom();
 
 private:
   LONG mReferenceCount;
@@ -51,15 +51,15 @@ private:
   bool mIsActive = false;
   std::mutex mMutex;
 
-  LogLoopContext *mLogLoopCtx = nullptr;
+  LoggingContext *mLoggingCtx = nullptr;
   AutomationContext *mAutomationCtx = nullptr;
 
-  HANDLE mLogLoopThread = nullptr;
+  HANDLE mLoggingThread = nullptr;
   HANDLE mUIAThread = nullptr;
   HANDLE mWindowsEventThread = nullptr;
 };
 
-class CCoreServerFactory : public IClassFactory {
+class CPocComFactory : public IClassFactory {
 public:
   // IUnknown methods
   STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject);

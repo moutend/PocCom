@@ -1,4 +1,4 @@
-LIBRARY	"CoreServer"
+LIBRARY	"PocCom"
 EXPORTS
 	DllCanUnloadNow PRIVATE
 	DllGetClassObject PRIVATE

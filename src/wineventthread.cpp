@@ -11,7 +11,7 @@
 #include "context.h"
 #include "types.h"
 #include "util.h"
-#include "wineventloop.h"
+#include "wineventthread.h"
 
 extern Logger::Logger *Log;
 
