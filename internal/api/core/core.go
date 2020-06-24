@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/moutend/CoreServer/internal/core"
-	"github.com/moutend/CoreServer/pkg/types"
+	"github.com/moutend/PocCom/internal/core"
+	"github.com/moutend/PocCom/pkg/types"
 )
 
 func putCursorNextElement(w http.ResponseWriter, r *http.Request) {

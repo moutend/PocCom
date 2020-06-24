@@ -4,27 +4,27 @@ import (
 	"log"
 
 	"github.com/go-ole/go-ole"
-	"github.com/moutend/CoreServer/pkg/com"
-	"github.com/moutend/CoreServer/pkg/types"
+	"github.com/moutend/PocCom/pkg/com"
+	"github.com/moutend/PocCom/pkg/types"
 )
 
 var (
 	FocusElement uintptr
 	isRunning    bool
-	server       *com.ICoreServer
+	server       *com.IPocCom
 )
 
-func Setup() error {
+func Setup(logServerAddr string) error {
 	if isRunning {
 		return nil
 	}
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
 		return err
 	}
-	if err := com.CoCreateInstance(com.CLSID_CoreServer, 0, com.CLSCTX_ALL, com.IID_ICoreServer, &server); err != nil {
+	if err := com.CoCreateInstance(com.CLSID_PocCom, 0, com.CLSCTX_ALL, com.IID_IPocCom, &server); err != nil {
 		return err
 	}
-	if err := server.Start(); err != nil {
+	if err := server.Start(logServerAddr, 0); err != nil {
 		return err
 	}
 

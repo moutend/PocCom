@@ -2,7 +2,7 @@ package api
 
 import (
 	"github.com/go-chi/chi"
-	"github.com/moutend/CoreServer/internal/api/core"
+	"github.com/moutend/PocCom/internal/api/core"
 )
 
 func Setup(router chi.Router) {

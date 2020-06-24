@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/moutend/CoreServer/internal/app"
+	"github.com/moutend/PocCom/internal/app"
 )
 
 func main() {

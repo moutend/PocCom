@@ -3,27 +3,28 @@ package app
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
-	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
-	"github.com/moutend/CoreServer/internal/core"
-	"github.com/moutend/CoreServer/internal/util"
-	"github.com/moutend/CoreServer/pkg/com"
-	"github.com/moutend/CoreServer/pkg/types"
+	"github.com/moutend/PocCom/internal/core"
+	"github.com/moutend/PocCom/internal/util"
+	"github.com/moutend/PocCom/pkg/com"
+	"github.com/moutend/PocCom/pkg/types"
 
 	"github.com/go-chi/chi"
-	"github.com/moutend/CoreServer/internal/api"
+	"github.com/moutend/PocCom/internal/api"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var RootCommand = &cobra.Command{
@@ -32,21 +33,45 @@ var RootCommand = &cobra.Command{
 }
 
 func rootRunE(cmd *cobra.Command, args []string) error {
-	if path, _ := cmd.Flags().GetString("config"); path != "" {
-		viper.SetConfigFile(path)
-	}
+	rand.Seed(time.Now().Unix())
+	p := make([]byte, 16)
 
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
-	viper.AutomaticEnv()
-
-	if err := viper.ReadInConfig(); err != nil {
-		return err
-	}
-	if err := core.Setup(); err != nil {
+	if _, err := rand.Read(p); err != nil {
 		return err
 	}
 
-	defer core.Teardown()
+	myself, err := user.Current()
+
+	if err != nil {
+		return err
+	}
+
+	fileName := fmt.Sprintf("AudioServer-%s.txt", hex.EncodeToString(p))
+	outputPath := filepath.Join(myself.HomeDir, "AppData", "Roaming", "ScreenReaderX", "Logs", "SystemLog", fileName)
+	output := util.NewBackgroundWriter(outputPath)
+
+	defer output.Close()
+
+	log.SetFlags(log.Ldate | log.Ltime | log.LUTC | log.Llongfile)
+	log.SetOutput(output)
+
+	var logServerConfig struct {
+		Addr string `json:"addr"`
+	}
+
+	logServerConfigPath := filepath.Join(myself.HomeDir, "AppData", "Roaming", "ScreenReaderX", "Server", "LogServer.json")
+
+	logServerConfigData, err := ioutil.ReadFile(logServerConfigPath)
+
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(logServerConfigData, &logServerConfig); err != nil {
+		return err
+	}
+	if err := core.Setup(logServerConfig.Addr); err != nil {
+		return err
+	}
 
 	core.SetMSAAEventHandler(func(eventId types.MSAAEvent, childId int64, pInterface uintptr) int64 {
 		return 0
@@ -64,7 +89,6 @@ func rootRunE(cmd *cobra.Command, args []string) error {
 
 		return 0
 	})
-
 	core.SetUIAEventHandler(func(eventId types.UIAEvent, pInterface uintptr) int64 {
 		e := (*com.IUIAutomationElement)(unsafe.Pointer(pInterface))
 
@@ -100,43 +124,37 @@ func rootRunE(cmd *cobra.Command, args []string) error {
 		return 0
 	})
 
+	defer core.Teardown()
+
 	router := chi.NewRouter()
 	api.Setup(router)
 
-	address := "localhost:7903"
-
-	if a := viper.GetString("server.address"); a != "" {
-		address = a
-	}
-
-	u, err := user.Current()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 
 	if err != nil {
 		return err
 	}
 
-	rand.Seed(time.Now().Unix())
-	p := make([]byte, 16)
+	serverAddr := listener.Addr().(*net.TCPAddr).String()
 
-	if _, err := rand.Read(p); err != nil {
+	serverConfig, err := json.Marshal(struct {
+		Addr string `json:"addr"`
+	}{
+		Addr: serverAddr,
+	})
+
+	if err != nil {
 		return err
 	}
 
-	fileName := fmt.Sprintf("CoreServer-%s.txt", hex.EncodeToString(p))
-	outputPath := filepath.Join(u.HomeDir, "AppData", "Roaming", "ScreenReaderX", "Logs", "SystemLog", fileName)
-	os.MkdirAll(filepath.Dir(outputPath), 0755)
+	serverConfigPath := filepath.Join(myself.HomeDir, "AppData", "Roaming", "ScreenReaderX", "Server", "AudioServer.json")
+	os.MkdirAll(filepath.Dir(serverConfigPath), 0755)
 
-	output := util.NewBackgroundWriter(outputPath)
-	defer output.Close()
+	if err := ioutil.WriteFile(serverConfigPath, serverConfig, 0644); err != nil {
+		return err
+	}
 
-	log.SetFlags(log.Ldate | log.Ltime | log.LUTC | log.Llongfile)
-	log.SetOutput(output)
+	log.Printf("Listening on %s\n", serverAddr)
 
-	log.Printf("Listening on %s\n", address)
-
-	return http.ListenAndServe(address, router)
-}
-
-func init() {
-	RootCommand.PersistentFlags().StringP("config", "c", "", "Path to configuration file")
+	return http.Serve(listener, router)
 }
