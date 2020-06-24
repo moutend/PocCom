@@ -7,7 +7,7 @@
 #include "util.h"
 
 extern Logger::Logger *Log;
-extern wchar_t *logServerAddr;
+extern wchar_t *LogServerAddr;
 
 const TCHAR ProgIDStr[] = TEXT("ScreenReaderX.PocCom");
 LONG LockCount{};
