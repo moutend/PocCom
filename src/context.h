@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ICoreServer/ICoreServer.h>
+#include <IPocCom/IPocCom.h>
 #include <windows.h>
 
 #include "types.h"
